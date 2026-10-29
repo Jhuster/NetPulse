@@ -8,7 +8,14 @@ func metric(_ value: Double?, unit: String = "") -> String {
 }
 @MainActor final class AppLifecycle: NSObject, NSApplicationDelegate {
     weak var store: Store?
+    weak var route: RouteStore?
     private var finishing = false
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        // Explicitly refresh the running Dock tile from this bundle. An updated
+        // ICNS alone can leave the old Launch Services icon visible in the Dock.
+        if let icon = Branding.icon { NSApplication.shared.applicationIconImage = icon }
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -17,56 +24,53 @@ func metric(_ value: Double?, unit: String = "") -> String {
         guard !finishing else { return .terminateLater }
         finishing = true
         Task { @MainActor in
+            store.stop()
+            await self.route?.stopAndWait()
             await store.finishForExit()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
     }
 
-    func applicationWillTerminate(_ notification: Notification) { store?.reset() }
+    func applicationWillTerminate(_ notification: Notification) { route?.reset(); store?.reset() }
 }
 
 @main struct NetPulseApp: App {
     @NSApplicationDelegateAdaptor(AppLifecycle.self) private var lifecycle
-    @StateObject var store = Store()
+    @StateObject var workspaces = Workspaces()
     var body: some Scene {
         WindowGroup {
-            ContentView().environmentObject(store)
+            RootView().environmentObject(workspaces).environmentObject(workspaces.ping).environmentObject(workspaces.route)
                 .frame(minWidth: 960, minHeight: 780)
-                .onAppear { lifecycle.store = store }
+                .onAppear { lifecycle.store = workspaces.ping; lifecycle.route = workspaces.route }
         }.defaultSize(width: 1140, height: 900)
-        .commands { CommandGroup(replacing: .newItem) { Button("新建会话") { store.reset() }.keyboardShortcut("n") } }
+        .commands { CommandGroup(replacing: .newItem) { Button("新建测试") { NotificationCenter.default.post(name: .netPulseNewSession, object: nil) }.keyboardShortcut("n") } }
     }
 }
-struct ContentView: View {
+struct PingView: View {
     @EnvironmentObject var s: Store
-    @State var showNew = false
+    @EnvironmentObject var workspaces: Workspaces
     @State var showRaw = false
     let accent = Color(red: 0.15, green: 0.45, blue: 0.95)
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                HStack(alignment: .center) {
-                    Image(systemName: "waveform.path.ecg").font(.system(size: 32, weight: .semibold)).foregroundStyle(accent)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("NetPulse").font(.system(size: 25, weight: .bold))
-                        Text("网络质量，看得见，也留得住").foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Label(s.imported ? "离线回放" : s.running ? "正在采集" : "已暂停", systemImage: s.running ? "record.circle" : "pause.circle")
-                        .foregroundStyle(s.running ? Color.green : Color.secondary)
-                    Button("导入日志", systemImage: "square.and.arrow.down") { s.load() }.disabled(s.running)
-                    Button("新建会话", systemImage: "plus") { showNew = true }
+                TargetInput(target: $s.target, title: "质量监测", locked: s.logURL != nil || s.running) {
+                    NotificationCenter.default.post(name: .netPulseNewSession, object: WorkspaceKind.quality.rawValue)
                 }
-                HStack(spacing: 12) {
-                    Image(systemName: "network").foregroundStyle(.secondary)
-                    TextField("域名或 IPv4 地址", text: $s.target).textFieldStyle(.plain).font(.title3.monospaced()).disabled(s.logURL != nil)
-                        .onSubmit { if !s.running { s.begin() } }
-                    Text("1 秒 / 包 · 5 秒 / 窗").font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Label(s.imported ? "离线回放" : s.running ? "正在采集" : "准备就绪 / 已暂停", systemImage: s.running ? "record.circle" : "pause.circle")
+                        .foregroundStyle(s.running ? Color.green : .secondary)
+                    Spacer()
+                    Button("导入日志", systemImage: "square.and.arrow.down") { workspaces.pickImport(.quality) }.disabled(s.running)
+                    Button("新建测试", systemImage: "plus") { NotificationCenter.default.post(name: .netPulseNewSession, object: WorkspaceKind.quality.rawValue) }
+                    Button("对该目标做路径诊断", systemImage: "point.3.connected.trianglepath.dotted") {
+                        NotificationCenter.default.post(name: .netPulseRouteTarget, object: s.target)
+                    }.disabled(s.target.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     Button { s.running ? s.stop() : s.begin() } label: {
-                        Label(s.running ? "暂停探测" : s.logURL == nil ? "开始探测" : "继续探测", systemImage: s.running ? "pause.fill" : "play.fill").padding(.horizontal, 8).padding(.vertical, 5)
-                    }.buttonStyle(.borderedProminent).tint(accent).disabled(s.imported)
-                }.padding(16).background(.background, in: RoundedRectangle(cornerRadius: 12))
+                        Label(s.running ? "暂停探测" : s.logURL == nil ? "开始探测" : "继续探测", systemImage: s.running ? "pause.fill" : "play.fill")
+                    }.buttonStyle(.borderedProminent).disabled(s.imported)
+                }
                 HStack(spacing: 12) {
                     stat(s.follow ? "最近 60 秒 Ping 丢包率" : "浏览位置前 60 秒丢包率", metric(s.recentLoss.percent, unit: "%"), s.recentLossDetail, .pink)
                     stat("平均往返时延（RTT）", metric(s.focused?.avg, unit: " ms"), "所选 5 秒窗口", accent)
@@ -136,10 +140,7 @@ struct ContentView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(26)
         }.background(Color(nsColor: .windowBackgroundColor))
-        .alert("新建会话？", isPresented: $showNew) {
-            Button("取消", role: .cancel) {}
-            Button("新建") { s.reset() }
-        } message: { Text("结束当前采集并清空当前视图，已保存的日志仍保留在本地。") }
+
     }
     var historyRange: ClosedRange<Double> {
         let first = s.samples.first?.date.timeIntervalSince1970 ?? Date().timeIntervalSince1970

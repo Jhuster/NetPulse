@@ -1,0 +1,33 @@
+# Type: NetPulse-Route
+# Route-Log-Version: 1
+# App-Version: 0.1.0
+# Target: example.net
+# Target-IP: 203.0.113.80
+# Started-At: 2026-10-29T06:00:00.000Z
+# Status: completed
+# Gateway: 192.168.1.1
+# Interface: en0 (demo)
+# Protocol: ICMP
+# Max-TTL: 30
+# Samples-Per-TTL: 3
+# Geo-Source: 合成演示，非实测与真实归属
+# Data-Note: 所有 IP、地域与 RTT 均为合成演示，用于界面回放
+ttl,sample,reply_ip,rtt_ms,outcome,annotation,country,province,geo_source
+1,0,192.168.1.1,1.5,reply,,,,
+1,1,192.168.1.1,2,reply,,,,
+1,2,192.168.1.1,1.8,reply,,,,
+2,0,100.64.0.1,7,reply,,,,
+2,1,100.64.0.1,8,reply,,,,
+2,2,100.64.0.1,9,reply,,,,
+3,0,192.0.2.10,17,reply,,中国,上海,合成演示
+3,1,,,timeout,,,,
+3,2,192.0.2.10,19,reply,,中国,上海,合成演示
+4,0,,,timeout,,,,
+4,1,,,timeout,,,,
+4,2,,,timeout,,,,
+5,0,198.51.100.20,39,reply,,新加坡,不适用,合成演示
+5,1,198.51.100.20,41,reply,,新加坡,不适用,合成演示
+5,2,198.51.100.20,40,reply,,新加坡,不适用,合成演示
+6,0,203.0.113.80,43,reply,,新加坡,不适用,合成演示
+6,1,203.0.113.80,44,reply,,新加坡,不适用,合成演示
+6,2,203.0.113.80,45,reply,,新加坡,不适用,合成演示
