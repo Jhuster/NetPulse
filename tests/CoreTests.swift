@@ -1,0 +1,43 @@
+import Foundation
+@main struct Tests {
+ static func main() throws {
+   let raw = "PING localhost (127.0.0.1): 56 data bytes\n64 bytes from 127.0.0.1: icmp_seq=0 ttl=64 time=0.172 ms\n1 packets transmitted, 1 packets received, 0.0% packet loss"
+   let p = parsePing(raw, id: 0, date: Date(), elapsed: 0, exit: 0)
+   assert(p.status == "reply" && p.rtt == 0.172 && p.ip == "127.0.0.1")
+   let timeout = parsePing("1 packets transmitted, 0 packets received, 100.0% packet loss", id: 1, date: Date(), elapsed: 1, exit: 2)
+   assert(timeout.status == "timeout" && timeout.rtt == nil)
+   assert(parsePing("ping: cannot resolve bad.invalid: Unknown host", id: 0, date: Date(), elapsed: 0, exit: 68).status == "dns_error")
+   func probe(_ id: Int, _ rtt: Double?) -> Probe { Probe(id: id, sentAt: Date(), elapsed: Double(id), rtt: rtt, status: rtt == nil ? "timeout" : "reply", raw: "fixture") }
+   let w = WindowSample(id: 0, date: Date(), probes: [probe(0,10),probe(1,14),probe(2,12)])
+   assert(w.jitter == 3 && w.loss == 0 && w.avg == 12)
+   let gap = WindowSample(id: 0, date: Date(), probes: [probe(0,10),probe(1,nil),probe(2,12)])
+   assert(gap.jitter == nil && abs(gap.loss! - 100.0/3) < 0.0001)
+   let lost = WindowSample(id: 0, date: Date(), probes: [probe(0,nil)])
+   assert(lost.loss == 100 && lost.avg == nil && lost.jitter == nil)
+   let error = Probe(id: 0, sentAt: Date(), elapsed: 0, status: "error", raw: "failure")
+   assert(WindowSample(id: 0, date: Date(), probes: [error]).loss == nil)
+   let record = Record(session_id: "fixture", event_type: "probe", timestamp: Date(), target: "127.0.0.1", probe: p)
+   let data = try JSONEncoder().encode(record)
+   let restored = try JSONDecoder().decode(Record.self, from: data)
+   assert(restored.probe?.rtt == p.rtt)
+   let header = CSVLog.header(id: "csv-fixture", target: "example.com", start: w.date)
+   let text = header + CSVLog.row(w) + CSVLog.row(WindowSample(id: 1, date: w.date.addingTimeInterval(5), probes: [probe(5,nil)]))
+   let csv = try CSVLog.read(text.replacingOccurrences(of: "\n", with: "\r\n"))
+   assert(csv.samples.count == 2 && csv.invalidRows == 0 && csv.target == "example.com")
+   assert(csv.samples[0].jitter == 3 && csv.samples[1].avg == nil && csv.samples[1].loss == 100)
+   let broken = try CSVLog.read(text + CSVLog.row(w) + "bad,row\n")
+   assert(broken.invalidRows == 2 && broken.samples.count == 2)
+   assert(text.contains(",100,,,1,0,0,partial,all_lost,insufficient_pairs,"))
+   let oneLost = WindowSample(id: 11, date: Date(), probes: [probe(0,nil)])
+   let manyOK = WindowSample(id: 0, date: Date(), probes: [probe(0,1),probe(1,1),probe(2,1),probe(3,1),probe(4,1)])
+   let recent = LossInterval.summarize([manyOK,oneLost], endingAt: 12)
+   assert(recent.valid == 6 && recent.lost == 1 && abs(recent.percent! - 100.0/6) < 0.000001)
+   let aged = LossInterval.summarize([manyOK,oneLost], endingAt: 13)
+   assert(aged.valid == 1 && aged.percent == 100)
+   assert(LossInterval.summarize([manyOK], endingAt: 0).percent == nil)
+   assert(LossInterval.summarize([manyOK], endingAt: 1).seconds == 5)
+   let errorOnly = WindowSample(id: 1, date: Date(), probes: [error])
+   assert(LossInterval.summarize([errorOnly], endingAt: 2).valid == 0)
+   print("PASS: parser, timeout, DNS failure, loss, jitter, gaps, missing data, JSON round trip, CSV headers/nulls/CRLF/duplicate and corrupt rows, rolling loss weighted counts/bounds/errors/warmup")
+ }
+}
