@@ -1,0 +1,6 @@
+Package: @cloudflare/speedtest
+Version: 1.15.0
+Tarball: https://registry.npmjs.org/@cloudflare/speedtest/-/speedtest-1.15.0.tgz
+Integrity: sha512-1IatFYolZHAsyK7TX4GazM2hOpK07WXFglcqFxV4HgUwxQx4fM05rVItlA3GC7fZ0z2JImCoctT+EA6Mliya5w==
+License: MIT
+Retrieved: 2026-10-30

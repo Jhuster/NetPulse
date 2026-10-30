@@ -10,6 +10,7 @@ func metric(_ value: Double?, unit: String = "") -> String {
     weak var store: Store?
     weak var route: RouteStore?
     weak var local: LocalNetworkStore?
+    weak var speed: SpeedStore?
     private var finishing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -25,6 +26,7 @@ func metric(_ value: Double?, unit: String = "") -> String {
         guard !finishing else { return .terminateLater }
         finishing = true
         Task { @MainActor in
+            await self.speed?.stopAndWait()
             store.stop()
             await self.route?.stopAndWait()
             await store.finishForExit()
@@ -41,9 +43,9 @@ func metric(_ value: Double?, unit: String = "") -> String {
     @StateObject var workspaces = Workspaces()
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(workspaces).environmentObject(workspaces.ping).environmentObject(workspaces.route)
+            RootView().environmentObject(workspaces).environmentObject(workspaces.ping).environmentObject(workspaces.route).environmentObject(workspaces.speed)
                 .frame(minWidth: 960, minHeight: 780)
-                .onAppear { lifecycle.store = workspaces.ping; lifecycle.route = workspaces.route; lifecycle.local = workspaces.local }
+                .onAppear { lifecycle.store = workspaces.ping; lifecycle.route = workspaces.route; lifecycle.local = workspaces.local; lifecycle.speed = workspaces.speed }
         }.defaultSize(width: 1140, height: 900)
         .commands { CommandGroup(replacing: .newItem) { Button(workspaces.page == 2 ? "刷新本机网络" : "新建测试") { NotificationCenter.default.post(name: .netPulseNewSession, object: nil) }.keyboardShortcut(workspaces.page == 2 ? "r" : "n") } }
     }

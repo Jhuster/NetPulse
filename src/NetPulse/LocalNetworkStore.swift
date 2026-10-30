@@ -22,6 +22,7 @@ import CoreLocation
     @Published private(set) var scanWaiting = false
     @Published private(set) var scanMessage = "按需扫描周边 Wi-Fi，不会自动定时扫描或切换网络。"
     @Published private(set) var connections = WiFiConnectionHistory()
+    var measurementBusy: (() -> Bool)?
     var scanTimeoutSeconds: Double = 20
     private var scanJob = UUID()
     private var scanGeneration = UUID()
@@ -133,6 +134,7 @@ import CoreLocation
     var permissionGranted: Bool { permission == .authorizedAlways }
     var canScanNearby: Bool { scanPermission?() ?? permissionGranted }
     func scanNearby() {
+        guard measurementBusy?() != true else { scanMessage = "网络测速中，请结束测速后再扫描周边 Wi-Fi。"; return }
         guard !scanBusy else { return }
         guard !reading else { scanMessage = "正在刷新本机信息，请稍候再扫描。"; return }
         guard canScanNearby else { scanMessage = "请先授权定位以读取周边 Wi-Fi 标识；不会读取 GPS 位置。"; return }
