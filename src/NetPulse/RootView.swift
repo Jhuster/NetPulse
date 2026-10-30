@@ -25,22 +25,26 @@ struct RootView: View {
                         Text("网络质量，看得见，也留得住").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("各工作区独立设置目标与运行").font(.caption).foregroundStyle(.secondary)
+                    Text("监测、诊断与本机信息，互不干扰").font(.caption).foregroundStyle(.secondary)
                 }
             }.padding(.horizontal, 26).padding(.top, 22).padding(.bottom, 14)
             HStack(spacing: 5) {
                 workspaceButton(0, title: "质量监测", detail: "Ping · 丢包 / 往返时延 / 抖动", icon: "waveform.path.ecg", running: s.running)
                 workspaceButton(1, title: "路径诊断", detail: "Traceroute · 逐跳路径与回复", icon: "point.3.connected.trianglepath.dotted", running: route.running)
+                workspaceButton(2, title: "本机网络", detail: "地址 · 出口 · Wi-Fi 信号", icon: "wifi", running: false)
             }.padding(5)
                 .background(navigationBlue.opacity(colorScheme == .dark ? 0.10 : 0.07), in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(navigationBlue.opacity(0.15)))
                 .padding(.horizontal, 26).padding(.bottom, 8)
             Group {
-                if workspaces.page == 0 { PingView() } else { RouteView() }
+                if workspaces.page == 0 { PingView() }
+                else if workspaces.page == 1 { RouteView() }
+                else { LocalNetworkView().environmentObject(workspaces.local) }
             }.disabled(workspaces.resetting.contains(WorkspaceKind(rawValue: workspaces.page) ?? .quality))
         }.background(Color(nsColor: .windowBackgroundColor))
         .onReceive(NotificationCenter.default.publisher(for: .netPulseNewSession)) { event in
             let kind = (event.object as? Int).flatMap(WorkspaceKind.init(rawValue:)) ?? WorkspaceKind(rawValue: workspaces.page) ?? .quality
+            if kind == .local { workspaces.local.refresh(); return }
             if !workspaces.resetting.contains(kind) { newKind = kind; showNew = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .netPulseRouteTarget)) { event in
@@ -71,7 +75,7 @@ struct RootView: View {
                                 .padding(.horizontal, 7).padding(.vertical, 3).background(Color.green.opacity(0.09), in: Capsule())
                         }
                     }
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.85)
                 }
                 Spacer(minLength: 4)
             }.foregroundStyle(selected ? navigationBlue : Color.primary)

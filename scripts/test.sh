@@ -10,5 +10,11 @@ swiftc -swift-version 5 -module-cache-path .build/module-cache -parse-as-library
 .build/route-tests
 swiftc -swift-version 5 -module-cache-path .build/module-cache -parse-as-library src/NetPulse/Models.swift src/NetPulse/CSV.swift src/NetPulse/RouteModels.swift src/NetPulse/GeoDatabase.swift src/NetPulse/GeoDatabaseInstaller.swift src/NetPulse/GeoDownload.swift src/NetPulse/RouteStore.swift tests/GeoTests.swift -o .build/geo-tests -framework AppKit
 .build/geo-tests
-swiftc -swift-version 5 -module-cache-path .build/module-cache -parse-as-library src/NetPulse/Models.swift src/NetPulse/CSV.swift src/NetPulse/Store.swift src/NetPulse/RouteModels.swift src/NetPulse/GeoDatabase.swift src/NetPulse/GeoDatabaseInstaller.swift src/NetPulse/GeoDownload.swift src/NetPulse/RouteStore.swift src/NetPulse/Workspaces.swift tests/WorkspaceTests.swift -o .build/workspace-tests -framework AppKit
+swiftc -swift-version 5 -module-cache-path .build/module-cache -parse-as-library src/NetPulse/Models.swift src/NetPulse/CSV.swift src/NetPulse/Store.swift src/NetPulse/RouteModels.swift src/NetPulse/GeoDatabase.swift src/NetPulse/GeoDatabaseInstaller.swift src/NetPulse/GeoDownload.swift src/NetPulse/RouteStore.swift src/NetPulse/LocalNetworkModels.swift src/NetPulse/WiFiDiagnostics.swift src/NetPulse/WiFiScanner.swift src/NetPulse/LocalNetworkReader.swift src/NetPulse/LocalNetworkStore.swift src/NetPulse/Workspaces.swift tests/WorkspaceTests.swift -o .build/workspace-tests -framework AppKit
 .build/workspace-tests
+
+swiftc -swift-version 5 -module-cache-path .build/module-cache -parse-as-library src/NetPulse/LocalNetworkModels.swift src/NetPulse/WiFiDiagnostics.swift src/NetPulse/WiFiScanner.swift src/NetPulse/LocalNetworkReader.swift src/NetPulse/LocalNetworkStore.swift tests/LocalNetworkTests.swift -o .build/local-network-tests -framework AppKit -framework Network -framework SystemConfiguration -framework CoreWLAN -framework CoreLocation
+.build/local-network-tests
+
+swiftc -swift-version 5 -module-cache-path .build/module-cache -parse-as-library src/NetPulse/LocalNetworkModels.swift src/NetPulse/WiFiDiagnostics.swift src/NetPulse/WiFiScanner.swift src/NetPulse/LocalNetworkReader.swift src/NetPulse/LocalNetworkStore.swift tests/WiFiDiagnosticsFixtures.swift tests/WiFiDiagnosticsTests.swift -o .build/wifi-diagnostics-tests -framework AppKit -framework Network -framework SystemConfiguration -framework CoreWLAN -framework CoreLocation
+.build/wifi-diagnostics-tests

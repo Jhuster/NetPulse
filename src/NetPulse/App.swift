@@ -9,6 +9,7 @@ func metric(_ value: Double?, unit: String = "") -> String {
 @MainActor final class AppLifecycle: NSObject, NSApplicationDelegate {
     weak var store: Store?
     weak var route: RouteStore?
+    weak var local: LocalNetworkStore?
     private var finishing = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -32,7 +33,7 @@ func metric(_ value: Double?, unit: String = "") -> String {
         return .terminateLater
     }
 
-    func applicationWillTerminate(_ notification: Notification) { route?.reset(); store?.reset() }
+    func applicationWillTerminate(_ notification: Notification) { local?.stop(); route?.reset(); store?.reset() }
 }
 
 @main struct NetPulseApp: App {
@@ -42,9 +43,9 @@ func metric(_ value: Double?, unit: String = "") -> String {
         WindowGroup {
             RootView().environmentObject(workspaces).environmentObject(workspaces.ping).environmentObject(workspaces.route)
                 .frame(minWidth: 960, minHeight: 780)
-                .onAppear { lifecycle.store = workspaces.ping; lifecycle.route = workspaces.route }
+                .onAppear { lifecycle.store = workspaces.ping; lifecycle.route = workspaces.route; lifecycle.local = workspaces.local }
         }.defaultSize(width: 1140, height: 900)
-        .commands { CommandGroup(replacing: .newItem) { Button("新建测试") { NotificationCenter.default.post(name: .netPulseNewSession, object: nil) }.keyboardShortcut("n") } }
+        .commands { CommandGroup(replacing: .newItem) { Button(workspaces.page == 2 ? "刷新本机网络" : "新建测试") { NotificationCenter.default.post(name: .netPulseNewSession, object: nil) }.keyboardShortcut(workspaces.page == 2 ? "r" : "n") } }
     }
 }
 struct PingView: View {

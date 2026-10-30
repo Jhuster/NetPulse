@@ -1,11 +1,12 @@
 import Foundation
 import AppKit
 
-enum WorkspaceKind: Int { case quality = 0, route = 1 }
+enum WorkspaceKind: Int { case quality = 0, route = 1, local = 2 }
 
 @MainActor final class Workspaces: ObservableObject {
     let ping: Store
     let route: RouteStore
+    let local = LocalNetworkStore()
     @Published var page = 0
     @Published var resetting: Set<WorkspaceKind> = []
     init() { ping = Store(); route = RouteStore() }
@@ -16,6 +17,7 @@ enum WorkspaceKind: Int { case quality = 0, route = 1 }
         switch kind {
         case .quality: await ping.finishForExit()
         case .route: await route.stopAndWait(); route.reset()
+        case .local: local.refresh()
         }
     }
     func needsRouteReplacement(_ target: String) -> Bool {
@@ -40,9 +42,11 @@ enum WorkspaceKind: Int { case quality = 0, route = 1 }
         case .route:
             guard !route.running && !resetting.contains(.route) else { return false }
             return route.load(url)
+        case .local: return false
         }
     }
     func pickImport(_ kind: WorkspaceKind) {
+        guard kind != .local else { return }
         let panel = NSOpenPanel(); panel.canChooseDirectories = true; panel.allowsMultipleSelection = false
         panel.message = kind == .quality ? "导入质量监测日志，只影响当前工作区" : "导入路径诊断日志，只影响当前工作区"
         guard panel.runModal() == .OK, let url = panel.url else { return }

@@ -16,6 +16,11 @@ import Foundation
         ping.begin(); route.begin(route.target)
         try await Task.sleep(nanoseconds:1_000_000_000)
         assert(ping.running && route.running && ping.target != route.target)
+        workspace.page = WorkspaceKind.local.rawValue
+        assert(!workspace.importFile(URL(fileURLWithPath: "/invalid"), into: .local))
+        await workspace.reset(.local)
+        assert(ping.running && route.running && workspace.local.exitInfo == nil)
+        workspace.local.stop()
         let routeLog = route.logURL
         await workspace.reset(.quality)
         assert(!ping.running && ping.logURL == nil && route.running && route.logURL == routeLog && route.target == "192.0.2.2")
