@@ -19,21 +19,21 @@ struct RouteView: View {
                     NotificationCenter.default.post(name: .netPulseNewSession, object: WorkspaceKind.route.rawValue)
                 }
                 HStack {
-                    Text("快速查看路径").font(.headline)
-                    Text("Traceroute · ICMP").font(.caption).foregroundStyle(.secondary)
-                    Button("持续观察（MTR，后续支持）") {}.disabled(true)
+                    Picker("模式", selection: $route.mode) {
+                        ForEach(RouteMode.allCases) { Text($0.title).tag($0) }
+                    }.pickerStyle(.segmented).frame(width: 300).disabled(route.hasSession || route.running)
                     Spacer()
                     Button("导入日志", systemImage: "square.and.arrow.down") { workspaces.pickImport(.route) }.disabled(route.running)
                     Button("新建测试", systemImage: "plus") { NotificationCenter.default.post(name: .netPulseNewSession, object: WorkspaceKind.route.rawValue) }
                     Button {
                         if route.running { route.halt() } else { route.begin(route.target) }
-                    } label: { Label(route.running ? "停止扫描" : route.hasSession ? "重新扫描" : "开始扫描", systemImage: route.running ? "stop.fill" : "play.fill") }
-                        .buttonStyle(.borderedProminent)
+                    } label: { Label(route.mode == .continuous ? (route.running ? "暂停观察" : route.hasSession ? "继续观察" : "开始观察") : (route.running ? "停止扫描" : route.hasSession ? "重新扫描" : "开始扫描"), systemImage: route.running ? "stop.fill" : "play.fill") }
+                        .buttonStyle(.borderedProminent).disabled(route.mode == .continuous && (route.imported || route.mtr.stopping))
                 }
                 HStack(alignment: .top, spacing: 20) {
                     summary("测试结果", route.imported ? "离线回放 · \(route.statusTitle)" : route.statusTitle, "已观察 \(route.hops.count) 个 TTL")
-                    summary("实际目标 IP", route.targetIP.isEmpty ? "等待解析" : route.targetIP, "协议 ICMP · 每跳最多 3 个样本")
-                    summary("出口网关 / 接口", route.gateway.isEmpty ? "未识别 / 直连或无可见网关" : route.gateway, route.networkInterface.isEmpty ? "按目标实际路由识别" : route.networkInterface)
+                    summary("实际目标 IP", route.targetIP.isEmpty ? "等待解析" : route.targetIP, route.mode == .quick ? "协议 ICMP · 每跳最多 3 个样本" : "ICMP · 会话内固定 IPv4")
+                    summary(route.mode == .quick ? "出口网关 / 接口" : "最新网关 / 接口", route.gateway.isEmpty ? "未识别 / 直连或无可见网关" : route.gateway, route.networkInterface.isEmpty ? "按目标实际路由识别" : route.networkInterface)
                 }
                 Label(route.message, systemImage: "info.circle").font(.callout).textSelection(.enabled)
                 HStack(alignment: .center, spacing: 16) {
@@ -68,7 +68,9 @@ struct RouteView: View {
                         if route.geoDownloading, let progress = route.geoDownloadProgress { ProgressView(value: progress).frame(width: 140) }
                     }
                 }
-                if route.hops.isEmpty {
+                if route.mode == .continuous {
+                    MTRPanel(m: route.mtr, route: route)
+                } else if route.hops.isEmpty {
                     VStack(spacing: 10) {
                         Image(systemName: "point.3.connected.trianglepath.dotted").font(.system(size: 36)).foregroundStyle(.blue)
                         Text(route.running ? "正在等待系统逐跳结果" : "看看到目标的路径").font(.title3.bold())
@@ -98,7 +100,7 @@ struct RouteView: View {
                     Text(route.raw.isEmpty ? "导入后的原始输出请查看配套 route-diagnostics.txt。" : route.raw)
                         .font(.system(.caption, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                Text("这是一次路径快照；每跳 RTT 为本机到回复节点的往返时间，相邻行差值不代表链路时延。3 个样本不足以评价长期丢包率。")
+                Text(route.mode == .quick ? "这是一次路径快照；每跳 RTT 为本机到回复节点的往返时间，相邻行差值不代表链路时延。3 个样本不足以评价长期丢包率。" : "持续观察使用系统逐跳轮询；静默节点会减慢轮次。点击节点与目标对照，路径变化或继续采样后分段。地理归属、ICMP 回复与实际业务体验应分别判断。")
                     .font(.caption).foregroundStyle(.secondary)
             }.padding(24)
         }.sheet(isPresented: $geoSettings) { GeoSettingsView().environmentObject(route) }

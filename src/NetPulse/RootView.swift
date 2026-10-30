@@ -26,14 +26,14 @@ struct RootView: View {
                         Text("网络质量，看得见，也留得住").font(.caption).foregroundStyle(.secondary)
                     }
                     Spacer()
-                    Text("监测 · 诊断 · 本机 · 测速").font(.caption).foregroundStyle(.secondary)
+                    Text("监测 · 诊断 · 测速 · 本机").font(.caption).foregroundStyle(.secondary)
                 }
             }.padding(.horizontal, 26).padding(.top, 22).padding(.bottom, 14)
             HStack(spacing: 5) {
                 workspaceButton(0, title: "质量监测", detail: "Ping · 丢包 / 往返时延 / 抖动", icon: "waveform.path.ecg", running: s.running)
                 workspaceButton(1, title: "路径诊断", detail: "Traceroute · 逐跳路径与回复", icon: "point.3.connected.trianglepath.dotted", running: route.running)
-                workspaceButton(2, title: "本机网络", detail: "地址 · 出口 · Wi-Fi 信号", icon: "wifi", running: false)
                 workspaceButton(3, title: "网络测速", detail: "吞吐量 · 空闲与负载时延", icon: "speedometer", running: speed.running)
+                workspaceButton(2, title: "本机网络", detail: "地址 · 出口 · Wi-Fi 信号", icon: "wifi", running: false)
             }.padding(5)
                 .background(navigationBlue.opacity(colorScheme == .dark ? 0.10 : 0.07), in: RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(navigationBlue.opacity(0.15)))

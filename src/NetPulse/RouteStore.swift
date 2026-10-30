@@ -4,6 +4,8 @@ import Darwin
 import UniformTypeIdentifiers
 
 @MainActor final class RouteStore: ObservableObject {
+    @Published var mode = RouteMode.quick
+    let mtr = MTRStore()
     @Published var running = false
     @Published var imported = false
     @Published var target = "1.1.1.1"
@@ -45,16 +47,45 @@ import UniformTypeIdentifiers
         self.executableURL = executableURL
         self.overrideArguments = arguments
         self.geoDirectory = geoDirectory
+        mtr.onChange = { [weak self] in self?.syncMTR() }
+        mtr.location = { [weak self] ip in self?.geo[ip] }
+        mtr.onAddress = { [weak self] ip in
+            guard let self else { return }
+            self.targetIP = ip; self.findGateway(ip, generation: self.token)
+        }
         let file = GeoDatabaseInstaller.databaseURL(in: geoDirectory)
         if FileManager.default.fileExists(atPath: file.path) {
             geoLoading = true
             Task { await restoreGeoDatabase(file) }
         }
     }
+    private func syncMTR() {
+        guard mode == .continuous else { return }
+        running = mtr.running || mtr.stopping; imported = mtr.imported; targetIP = mtr.targetIP
+        logURL = mtr.logURL; state = mtr.state; message = mtr.message; raw = mtr.raw
+        if !mtr.target.isEmpty { target = mtr.target }
+        let grouped = Dictionary(grouping: mtr.samples.filter { $0.kind == "hop" && $0.segment == mtr.segment }, by: \.ttl)
+        hops = grouped.keys.sorted().map { ttl in
+            RouteHop(id: ttl, probes: Array(grouped[ttl]!.suffix(100)).enumerated().map { index, sample in
+                RouteProbe(id: index, address: sample.address.isEmpty ? nil : sample.address, rtt: sample.rtt, annotation: sample.annotation)
+            }, raw: "持续观察样本")
+        }
+        // Log geography snapshots only for future samples; offline archives retain their original values.
+        if !imported { resolveGeography() }
+    }
     var selected: RouteHop? { hops.first { $0.id == selectedHop } ?? hops.last }
     var hasSession: Bool { logURL != nil }
     var observedTarget: Bool { !targetIP.isEmpty && hops.contains { h in h.probes.contains { $0.address == targetIP && $0.rtt != nil && $0.annotation.isEmpty } } }
     var statusTitle: String {
+        if mode == .continuous {
+            if mtr.stopping { return "正在回收探测进程" }
+            switch state {
+            case "running": return imported ? "未完成的持续观察记录" : "持续观察中"
+            case "paused": return "已暂停"
+            case "failed": return "持续观察失败"
+            default: return "准备就绪"
+            }
+        }
         switch state {
         case "running": return imported ? "未完成扫描记录" : "正在扫描"
         case "completed": return "观察到目标回复"
@@ -76,10 +107,18 @@ import UniformTypeIdentifiers
     }
     func save() {
         guard let logURL, !imported else { return }
+        if mode == .continuous {
+            mtr.updateContext(["Gateway": gateway, "Interface": networkInterface, "Geo-Source": geoSource]); return
+        }
         do { try Data(RouteCSV.encode(metadata, hops: hops, geo: geo).utf8).write(to: logURL, options: .atomic) }
         catch { halt("failed"); running = false; state = "failed"; message = "路径日志写入失败：\(error.localizedDescription)" }
     }
     func begin(_ address: String) {
+        if mode == .continuous {
+            guard !running, !imported else { return }
+            mtr.logRoot = logRoot; mtr.hopLimit = min(30, hopLimit)
+            mtr.begin(address); syncMTR(); return
+        }
         let address = address.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !running else { return }
         guard !address.isEmpty, address.count <= 253, address.first != "-", address.range(of: "^[A-Za-z0-9][A-Za-z0-9.\\-]*$", options: .regularExpression) != nil else { message = "请输入域名或 IPv4 地址，不包含协议、端口或路径"; return }
@@ -151,6 +190,7 @@ import UniformTypeIdentifiers
         save(); try? diagnostics?.close(); diagnostics = nil
     }
     func halt(_ reason: String = "cancelled") {
+        if mode == .continuous { mtr.pause(); syncMTR(); return }
         guard running else { return }
         exitRequested = reason; state = reason
         message = reason == "timed_out" ? "已到时间预算，正在保存部分结果" : "正在停止并保存已收到的结果"
@@ -163,12 +203,14 @@ import UniformTypeIdentifiers
         }
     }
     func stopAndWait() async {
+        if mode == .continuous { await mtr.stopAndWait(); syncMTR(); return }
         halt()
         let deadline = ProcessInfo.processInfo.systemUptime + 3
         while running && ProcessInfo.processInfo.systemUptime < deadline { try? await Task.sleep(nanoseconds: 50_000_000) }
         if running { reset() }
     }
     func reset() {
+        mtr.reset()
         geoTask?.cancel(); geoRevision = UUID()
         token = UUID()
         if let p = process, p.isRunning { p.terminate(); Darwin.kill(p.processIdentifier, SIGKILL) }
@@ -184,7 +226,7 @@ import UniformTypeIdentifiers
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let text = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self); p.waitUntilExit()
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.token == generation, !self.imported else { return }
+                guard let self, self.token == generation, !self.imported, self.gatewayProcess === p else { return }
                 self.gateway = capture("(?m)^\\s*gateway:\\s*([0-9.]+)", text).flatMap { validIPv4($0) ? $0 : nil } ?? ""
                 self.networkInterface = capture("(?m)^\\s*interface:\\s*(\\S+)", text) ?? "未识别"
                 self.gatewayProcess = nil; self.save()
@@ -288,6 +330,7 @@ import UniformTypeIdentifiers
         let revision = UUID(); geoRevision = revision
         let generation = token
         let addresses = Set(hops.flatMap(\.addresses)).filter { geo[$0] == nil && geographicAddress($0) }
+        guard !addresses.isEmpty else { return }
         geoTask = Task {
             let result = await Task.detached(priority: .utility) { () -> ([String:GeoLocation], Bool) in
                 var values: [String:GeoLocation] = [:]; var failed = false
@@ -307,10 +350,18 @@ import UniformTypeIdentifiers
         guard !running else { message = "请停止扫描后再导入"; return false }
         do {
             let isDir = try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true
-            let file = isDir ? url.appendingPathComponent("route.csv") : url
+            let file = isDir ? url.appendingPathComponent(FileManager.default.fileExists(atPath: url.appendingPathComponent("mtr.csv").path) ? "mtr.csv" : "route.csv") : url
             guard (try file.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) <= 50_000_000 else { throw CocoaError(.fileReadTooLarge) }
-            let text = try String(contentsOf: file, encoding: .utf8); let archive = try RouteCSV.decode(text)
-            reset(); imported = true; target = archive.metadata["Target"]!; targetIP = archive.metadata["Target-IP"] ?? ""; started = CSVLog.date(archive.metadata["Started-At"]!)!; gateway = archive.metadata["Gateway"] ?? ""; networkInterface = archive.metadata["Interface"] ?? ""; geoSource = archive.metadata["Geo-Source"] ?? "日志记录"
+            let text = try String(contentsOf: file, encoding: .utf8)
+            if text.hasPrefix("# MTR-Log-Version:") || text.contains("# Type: NetPulse-MTR\n") || text.contains("# Type: NetPulse-MTR\r\n") {
+                let archive = try MTRCSV.decode(text)
+                reset(); mode = .continuous
+                gateway = archive.metadata["Gateway"] ?? ""; networkInterface = archive.metadata["Interface"] ?? ""
+                geoSource = archive.metadata["Geo-Source"] ?? "日志快照"
+                mtr.load(archive, from: file); syncMTR(); return true
+            }
+            let archive = try RouteCSV.decode(text)
+            reset(); mode = .quick; imported = true; target = archive.metadata["Target"]!; targetIP = archive.metadata["Target-IP"] ?? ""; started = CSVLog.date(archive.metadata["Started-At"]!)!; gateway = archive.metadata["Gateway"] ?? ""; networkInterface = archive.metadata["Interface"] ?? ""; geoSource = archive.metadata["Geo-Source"] ?? "日志记录"
             hops = archive.hops; geo = archive.geo; selectedHop = hops.last?.id; state = archive.metadata["Status"] ?? "not_reached"; logURL = file
             let missingTarget = state == "completed" && !observedTarget
             if missingTarget { state = "not_reached" }
@@ -331,9 +382,11 @@ import UniformTypeIdentifiers
         do {
             guard !FileManager.default.fileExists(atPath: destination.path) else { message = "请选择新的导出名称"; return }
             try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
-            try FileManager.default.copyItem(at: logURL, to: destination.appendingPathComponent("route.csv"))
-            let raw = logURL.deletingLastPathComponent().appendingPathComponent("route-diagnostics.txt")
-            if FileManager.default.fileExists(atPath: raw.path) { try FileManager.default.copyItem(at: raw, to: destination.appendingPathComponent("route-diagnostics.txt")) }
+            let name = mode == .continuous ? "mtr.csv" : "route.csv"
+            let diagnosticName = mode == .continuous ? "mtr-diagnostics.txt" : "route-diagnostics.txt"
+            try FileManager.default.copyItem(at: logURL, to: destination.appendingPathComponent(name))
+            let raw = logURL.deletingLastPathComponent().appendingPathComponent(diagnosticName)
+            if FileManager.default.fileExists(atPath: raw.path) { try FileManager.default.copyItem(at: raw, to: destination.appendingPathComponent(diagnosticName)) }
             message = "已导出路径会话；包含目标、路径 IP 和可用的诊断记录"
         } catch { message = "路径导出失败：\(error.localizedDescription)" }
     }
